@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aster & Row — AI Customer Support</title>
+  <style>
+    :root {
+      --primary: #1b3d30;
+      --primary-hover: #142e24;
+      --primary-light: #eef5f1;
+      --text: #1a201c;
+      --text-muted: #64746d;
+      --bg: #f5f8f6;
+      --card: #ffffff;
+      --border: #dbe4df;
+      --accent: #d97736;
+      --handoff-bg: #fff8e6;
+      --handoff-text: #926006;
+      --handoff-border: #f8df9e;
+      --citation-bg: #e3efe8;
+      --citation-text: #1d4d3b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+    
+    .chat-container { width: 100%; max-width: 880px; height: 100vh; display: flex; flex-direction: column; background: var(--card); border-left: 1px solid var(--border); border-right: 1px solid var(--border); box-shadow: 0 10px 35px rgba(0,0,0,0.05); position: relative; }
+    
+    /* Header */
+    header { background: var(--primary); color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.15rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+    
+    /* Mode Toggle Switch */
+    .mode-switch { display: flex; background: rgba(0,0,0,0.25); padding: 3px; border-radius: 20px; font-size: 0.76rem; font-weight: 500; }
+    .mode-btn { background: transparent; border: none; color: rgba(255,255,255,0.7); padding: 5px 12px; border-radius: 16px; cursor: pointer; transition: all 0.2s; }
+    .mode-btn.active { background: white; color: var(--primary); font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.15); }
+    
+    .reset-btn { background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white; padding: 5px 12px; border-radius: 16px; cursor: pointer; font-size: 0.78rem; transition: background 0.2s; }
+    .reset-btn:hover { background: rgba(255,255,255,0.15); }
+    
+    /* Quick Chips */
+    .quick-prompts { display: flex; gap: 8px; padding: 12px 20px; overflow-x: auto; background: var(--primary-light); border-bottom: 1px solid var(--border); }
+    .quick-chip { background: white; border: 1px solid var(--border); border-radius: 18px; padding: 6px 14px; font-size: 0.82rem; white-space: nowrap; cursor: pointer; color: var(--primary); font-weight: 500; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+    .quick-chip:hover { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* Messages Area */
+    .messages-area { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
+    .msg { display: flex; flex-direction: column; max-width: 85%; line-height: 1.6; font-size: 0.95rem; animation: fadeIn 0.25s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .msg.user { align-self: flex-end; }
+    .msg.user .bubble { background: var(--primary); color: white; border-radius: 18px 18px 4px 18px; padding: 12px 18px; font-size: 0.95rem; box-shadow: 0 2px 6px rgba(27,61,48,0.15); }
+    
+    .msg.bot { align-self: flex-start; width: 100%; }
+    .msg.bot .bubble { background: #f9fbf9; color: var(--text); border-radius: 18px 18px 18px 4px; padding: 16px 20px; border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+    
+    /* Markdown Styles */
+    .bubble p { margin-bottom: 10px; }
+    .bubble p:last-of-type { margin-bottom: 0; }
+    .bubble ul, .bubble ol { margin: 8px 0 12px 20px; padding-left: 4px; }
+    .bubble li { margin-bottom: 6px; }
+    .bubble strong { font-weight: 600; color: #0d2119; }
+    
+    /* Inline Citation Pills */
+    .inline-citation {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #e6f4ed;
+      color: #1b3d30;
+      font-size: 0.78rem;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      margin: 3px 4px;
+      border: 1px solid #72b998;
+      box-shadow: 0 1px 3px rgba(27,61,48,0.08);
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .inline-citation:hover {
+      background: #1b3d30;
+      color: white;
+      border-color: #1b3d30;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(27,61,48,0.2);
+    }
+    .citations-footer {
+      display: none;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed #d5e4dc;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+    }
+    body.inspector-active .citations-footer {
+      display: flex !important;
+    }
+    .citations-label {
+      font-weight: 700;
+      color: #3b5c4f;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-right: 2px;
+    }
+    .inspector-box { display: none; margin-top: 14px; padding: 12px 16px; background: white; border: 1px solid #d0ded6; border-radius: 10px; font-size: 0.82rem; }
+    body.inspector-active .inspector-box { display: block !important; }
+    .inspector-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-weight: 600; color: var(--primary); }
+    .intent-pill { background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    .source-chip { display: inline-flex; align-items: center; gap: 4px; background: #f0f7f3; color: #1b3d30; padding: 5px 12px; border-radius: 6px; margin: 4px 6px 4px 0; font-family: monospace; font-size: 0.78rem; font-weight: 600; border: 1px solid #a3d4bb; cursor: pointer; transition: all 0.2s; }
+    .source-chip:hover { background: #1b3d30; color: white; border-color: #1b3d30; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+    
+    /* Handoff Alert */
+    .handoff-alert { margin-top: 12px; padding: 10px 14px; background: var(--handoff-bg); color: var(--handoff-text); border-radius: 8px; font-size: 0.82rem; font-weight: 500; display: flex; align-items: center; gap: 8px; border: 1px solid var(--handoff-border); }
+    
+    /* Input Area */
+    .input-area { padding: 16px 20px; border-top: 1px solid var(--border); background: white; display: flex; gap: 10px; }
+    .input-area input { flex: 1; padding: 12px 18px; border: 1px solid var(--border); border-radius: 24px; font-size: 0.95rem; outline: none; transition: all 0.2s; }
+    .input-area input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(27,61,48,0.12); }
+    .send-btn { background: var(--primary); color: white; border: none; border-radius: 24px; padding: 12px 24px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .send-btn:hover { background: var(--primary-hover); }
+    
+    /* Live Subtle Thinking Chip */
+    .thinking-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--primary-light); color: var(--primary); padding: 8px 16px; border-radius: 20px; font-size: 0.82rem; font-weight: 500; border: 1px solid var(--border); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    
+    /* Reference Drawer / Modal */
+    .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; backdrop-filter: blur(3px); }
+    .drawer { position: fixed; right: -680px; top: 0; bottom: 0; width: 100%; max-width: 680px; background: #ffffff; z-index: 101; box-shadow: -6px 0 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; transition: right 0.3s cubic-bezier(0.2, 0.9, 0.3, 1); }
+    .drawer.open { right: 0; }
+    .drawer-header { padding: 18px 22px; background: #133024; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .drawer-header h3 { font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .close-drawer-btn { background: rgba(255,255,255,0.15); border: none; color: white; font-size: 1.1rem; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+    .close-drawer-btn:hover { background: rgba(255,255,255,0.3); }
+    
+    /* Drawer Tabs */
+    .drawer-tabs { display: flex; background: #eef5f1; border-bottom: 1px solid var(--border); }
+    .drawer-tab-btn { flex: 1; padding: 14px; border: none; background: transparent; font-weight: 600; font-size: 0.88rem; cursor: pointer; color: var(--text-muted); transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .drawer-tab-btn.active { background: white; color: var(--primary); border-bottom: 3px solid var(--primary); }
+    
+    .drawer-body { padding: 22px; overflow-y: auto; flex: 1; font-size: 0.92rem; line-height: 1.65; background: #fafdfb; }
+    .drawer-meta-tag { display: inline-block; background: #e2ede7; color: #1b3d30; padding: 4px 10px; border-radius: 6px; font-size: 0.76rem; margin-right: 6px; margin-bottom: 12px; font-weight: 600; border: 1px solid #c0ded0; }
+    
+    .highlight-card {
+      background: #fffdf5;
+      border: 2px solid #e0be6c;
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 8px;
+      box-shadow: 0 2px 10px rgba(217, 119, 6, 0.08);
+    }
+    .highlight-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #92400e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .chunk-content-box {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 0.92rem;
+      color: #1c1917;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .jump-to-raw-btn {
+      margin-top: 14px;
+      background: #1b3d30;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s;
+    }
+    .jump-to-raw-btn:hover { background: #285745; }
+    
+    /* Raw File Code Viewer */
+    .file-viewer-container { background: #181c1a; color: #d4d4d4; border-radius: 10px; overflow: hidden; border: 1px solid #2a3830; font-family: "SF Mono", Monaco, Menlo, Consolas, "Courier New", monospace; font-size: 0.84rem; }
+    .file-viewer-header { background: #232d27; padding: 10px 16px; font-size: 0.78rem; color: #a3b8ad; border-bottom: 1px solid #32443a; display: flex; justify-content: space-between; font-weight: 600; }
+    .file-viewer-content { padding: 16px; overflow-x: auto; max-height: 70vh; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+    .file-highlight-mark {
+      background: #ffd54f;
+      color: #000000;
+      font-weight: 600;
+      padding: 3px 6px;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(255, 213, 79, 0.6);
+      border: 1px solid #ffb300;
+      display: inline-block;
+    }
+    .header-subtitle {
+      font-size: 0.78rem;
+      color: #b5d1c4;
+      margin-top: 2px;
+      font-weight: 500;
+    }
+    .author-link {
+      color: #ffffff;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+    .author-link:hover {
+      color: #9fe0be;
+    }
+    .chat-footer {
+      padding: 8px 20px;
+      background: #f8faf9;
+      border-top: 1px solid #eef2ef;
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+    }
+    .portfolio-link {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    .portfolio-link:hover {
+      color: #0d2119;
+      text-decoration: underline;
+    }
+    .portfolio-badge {
+      background: #e2ede7;
+      color: #1b3d30;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid #bedacf;
+      transition: all 0.2s;
+    }
+    .portfolio-badge:hover {
+      background: #1b3d30;
+      color: #ffffff;
+      border-color: #1b3d30;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <header>
+      <div>
+        <h1>🌲 Aster & Row Support</h1>
+        <div class="header-subtitle">Made by <a href="https://nishantmaurya.me" target="_blank" rel="noopener noreferrer" class="author-link">Nishant Maurya</a> • <a href="https://nishantmaurya.me" target="_blank" rel="noopener noreferrer" style="color: #c8ebd9; text-decoration: none;">nishantmaurya.me</a></div>
+      </div>
+      <div class="header-actions">
+        <!-- Two Modes Toggle -->
+        <div class="mode-switch">
+          <button class="mode-btn active" id="userModeBtn" onclick="setMode('user')">👤 Customer View</button>
+          <button class="mode-btn" id="inspectorModeBtn" onclick="setMode('inspector')">🔬 Brand Inspector</button>
+        </div>
+        <button class="reset-btn" onclick="resetSession()">Reset</button>
+      </div>
+    </header>
+
+    <div class="quick-prompts">
+      <span class="quick-chip" onclick="sendPrompt('How long do I have to return an item?')">📦 Return Window</span>
+      <span class="quick-chip" onclick="sendPrompt('Where is ORD-1007 and when will it arrive?')">🚚 Track ORD-1007</span>
+      <span class="quick-chip" onclick="sendPrompt('Can I put the Breeze Tumbler in the dishwasher?')">🥛 Tumbler Care</span>
+      <span class="quick-chip" onclick="sendPrompt('Do you ship to Canada?')">🇨🇦 Canada Shipping</span>
+    </div>
+
+    <div class="messages-area" id="messagesArea">
+      <div class="msg bot">
+        <div class="bubble">
+          <p>Hello! I am the Aster &amp; Row AI Support Assistant. I can help answer questions about our returns policy, shipping, warranty, product care, or check your order status. How can I help you today?</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <input type="text" id="userInput" placeholder="Ask a question or enter order ID..." onkeypress="handleKey(event)" />
+      <button class="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+
+    <div class="chat-footer">
+      <span>Built with ❤️ by <a href="https://nishantmaurya.me" target="_blank" rel="noopener noreferrer" class="portfolio-link">Nishant Maurya</a></span>
+      <span>•</span>
+      <a href="https://nishantmaurya.me" target="_blank" rel="noopener noreferrer" class="portfolio-badge">🌐 nishantmaurya.me</a>
+    </div>
+  </div>
+
+  <!-- Reference Drawer Modal -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+  <div class="drawer" id="chunkDrawer">
+    <div class="drawer-header">
+      <h3 id="drawerTitle">📄 Reference Inspector</h3>
+      <button class="close-drawer-btn" onclick="closeDrawer()">✕</button>
+    </div>
+    
+    <!-- Tabs: Chunk vs Full Raw File -->
+    <div class="drawer-tabs">
+      <button class="drawer-tab-btn active" id="tabExcerptBtn" onclick="switchDrawerTab('excerpt')">🔍 Cited Excerpt</button>
+      <button class="drawer-tab-btn" id="tabFullDocBtn" onclick="switchDrawerTab('fulldoc')">💻 Raw File Preview</button>
+    </div>
+
+    <div class="drawer-body">
+      <div id="excerptTabContent">
+        <!-- Injected chunk content -->
+      </div>
+      <div id="fullDocTabContent" style="display: none;">
+        <div class="file-viewer-container">
+          <div class="file-viewer-header">
+            <span id="fileViewerPath">file.md</span>
+            <span>Raw File View</span>
+          </div>
+          <div class="file-viewer-content" id="rawFileContent">
+            <em>Loading raw file source...</em>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentMode = "user"; // "user" (default) or "inspector"
+    let sessionId = "session_" + Math.random().toString(36).substring(2, 9);
+    let lastReferencedChunks = [];
+    let currentChunk = null;
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById("userModeBtn").className = "mode-btn" + (mode === "user" ? " active" : "");
+      document.getElementById("inspectorModeBtn").className = "mode-btn" + (mode === "inspector" ? " active" : "");
+      
+      if (mode === "inspector") {
+        document.body.classList.add("inspector-active");
+      } else {
+        document.body.classList.remove("inspector-active");
+      }
+    }
+
+    function resetSession() {
+      sessionId = "session_" + Math.random().toString(36).substring(2, 9);
+      const area = document.getElementById("messagesArea");
+      area.innerHTML = `
+        <div class="msg bot">
+          <div class="bubble">
+            <p>Session reset. How can I help you with Aster &amp; Row products or orders?</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function sendPrompt(text) {
+      document.getElementById("userInput").value = text;
+      sendMessage();
+    }
+
+    function handleKey(e) {
+      if (e.key === "Enter") sendMessage();
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById("userInput");
+      const text = input.value.trim();
+      if (!text) return;
+      
+      input.value = "";
+      const area = document.getElementById("messagesArea");
+
+      // Add user message
+      const userDiv = document.createElement("div");
+      userDiv.className = "msg user";
+      userDiv.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+      area.appendChild(userDiv);
+      area.scrollTop = area.scrollHeight;
+
+      // Add live subtle thinking indicator
+      const thinkingDiv = document.createElement("div");
+      thinkingDiv.className = "msg bot";
+      thinkingDiv.id = "thinkingIndicator";
+      thinkingDiv.innerHTML = `
+        <div class="thinking-chip">
+          <span>✨</span>
+          <span id="thinkingText">Analyzing request and store policies...</span>
+        </div>
+      `;
+      area.appendChild(thinkingDiv);
+      area.scrollTop = area.scrollHeight;
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, session_id: sessionId, tenant_id: "aster-and-row" })
+        });
+
+        const data = await res.json();
+        thinkingDiv.remove();
+
+        lastReferencedChunks = data.referenced_chunks || [];
+
+        // Add bot message
+        const botDiv = document.createElement("div");
+        botDiv.className = "msg bot";
+
+        // Format Inspector Box (Shown only in Brand Inspector Mode)
+        let inspectorHtml = "";
+        let sourcesChips = "";
+
+        if (data.referenced_chunks && data.referenced_chunks.length > 0) {
+          sourcesChips = data.referenced_chunks.map((c, i) => `
+            <span class="source-chip" onclick="inspectChunk(${i})" title="Click to view full source document">
+              🔍 ${escapeHtml(c.filename)} &gt; ${escapeHtml(c.heading || 'General')}
+            </span>
+          `).join("");
+        } else if (data.tool_called === "order_lookup") {
+          sourcesChips = `
+            <span class="source-chip" onclick="inspectByFilename('orders.json', 'Order Database')" title="Click to view raw JSON database">
+              📦 data/orders.json &gt; Verified Orders Database
+            </span>
+          `;
+        } else if (data.sources && data.sources.length > 0) {
+          sourcesChips = data.sources.map(s => `
+            <span class="source-chip" onclick="inspectByFilename('${escapeHtml(s.split('>')[0].trim())}', '${escapeHtml(s)}')" title="Click to view source">
+              📄 ${escapeHtml(s)}
+            </span>
+          `).join("");
+        }
+
+        inspectorHtml = `
+          <div class="inspector-box" style="display: ${currentMode === 'inspector' ? 'block' : 'none'};">
+            <div class="inspector-header">
+              <span>🔬 Brand Inspector</span>
+              <span class="intent-pill">Intent: ${escapeHtml(data.intent || 'support')}</span>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px;">
+              Latency: <strong>${data.duration_ms || 0}ms</strong> | Tool: <strong>${data.tool_called || 'none'}</strong>
+            </div>
+            ${sourcesChips ? `
+              <div style="margin-top: 6px;">
+                <strong>Retrieved References (Click to view actual source file):</strong><br>
+                <div style="margin-top: 4px;">${sourcesChips}</div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+
+        let handoffHtml = "";
+        if (data.handoff_recommended) {
+          handoffHtml = `<div class="handoff-alert">⚠️ Human support confirmation recommended for this inquiry.</div>`;
+        }
+
+        const contentHtml = data.html_answer || escapeHtml(data.answer).replace(/\n/g, '<br>');
+
+        botDiv.innerHTML = `
+          <div class="bubble">
+            ${contentHtml}
+            ${handoffHtml}
+            ${inspectorHtml}
+          </div>
+        `;
+        area.appendChild(botDiv);
+        area.scrollTop = area.scrollHeight;
+
+        // Attach click handlers to any inline citation pills
+        botDiv.querySelectorAll(".inline-citation").forEach(pill => {
+          pill.style.cursor = "pointer";
+          pill.addEventListener("click", () => {
+            const cit = pill.getAttribute("data-citation") || pill.innerText;
+            const cleanCit = cit.replace("📄", "").trim();
+            const chunkIdx = (data.referenced_chunks || []).findIndex(c => 
+              c.citation === cleanCit || cleanCit.includes(c.filename) || (c.filename && cleanCit.includes(c.filename))
+            );
+            if (chunkIdx !== -1) {
+              inspectChunk(chunkIdx);
+            } else {
+              const filename = cleanCit.split(">")[0].trim();
+              inspectByFilename(filename, cleanCit);
+            }
+          });
+        });
+
+      } catch (err) {
+        thinkingDiv.remove();
+        const errDiv = document.createElement("div");
+        errDiv.className = "msg bot";
+        errDiv.innerHTML = `<div class="bubble" style="color: red;">Error connecting to support agent. Please try again.</div>`;
+        area.appendChild(errDiv);
+      }
+    }
+
+    function switchDrawerTab(tab) {
+      const isExcerpt = tab === 'excerpt';
+      document.getElementById("tabExcerptBtn").className = "drawer-tab-btn" + (isExcerpt ? " active" : "");
+      document.getElementById("tabFullDocBtn").className = "drawer-tab-btn" + (!isExcerpt ? " active" : "");
+      document.getElementById("excerptTabContent").style.display = isExcerpt ? "block" : "none";
+      document.getElementById("fullDocTabContent").style.display = !isExcerpt ? "block" : "none";
+
+      if (!isExcerpt && currentChunk) {
+        loadRawFile(currentChunk.filename, currentChunk.content);
+      }
+    }
+
+    async function loadRawFile(filename, chunkContent) {
+      const container = document.getElementById("rawFileContent");
+      document.getElementById("fileViewerPath").innerText = filename;
+      container.innerHTML = "<em>Loading raw source file...</em>";
+      try {
+        const res = await fetch(`/api/document?filename=${encodeURIComponent(filename)}&tenant_id=aster-and-row`);
+        if (!res.ok) {
+          container.innerHTML = `<span style="color:#ff6b6b;">Could not load file '${escapeHtml(filename)}'.</span>`;
+          return;
+        }
+        const data = await res.json();
+        let raw = data.raw_text;
+        
+        // Highlight the matched chunk content inside the raw file
+        if (chunkContent && chunkContent.trim().length > 10) {
+          const needle = chunkContent.trim();
+          let escapedRaw = escapeHtml(raw);
+          let escapedNeedle = escapeHtml(needle);
+          
+          if (escapedRaw.includes(escapedNeedle)) {
+            escapedRaw = escapedRaw.replace(escapedNeedle, `<span id="activeSourceHighlight" class="file-highlight-mark">${escapedNeedle}</span>`);
+          } else {
+            // Match first sentence or key lines
+            const lines = needle.split('\n').map(l => l.trim()).filter(l => l.length > 12);
+            for (let line of lines) {
+              const escLine = escapeHtml(line);
+              if (escapedRaw.includes(escLine)) {
+                escapedRaw = escapedRaw.replace(escLine, `<span id="activeSourceHighlight" class="file-highlight-mark">${escLine}</span>`);
+                break;
+              }
+            }
+          }
+          container.innerHTML = escapedRaw;
+          
+          // Auto-scroll to the highlighted mark
+          setTimeout(() => {
+            const el = document.getElementById("activeSourceHighlight");
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 150);
+        } else {
+          container.innerHTML = escapeHtml(raw);
+        }
+      } catch (e) {
+        container.innerHTML = `<span style="color:#ff6b6b;">Error loading source file preview.</span>`;
+      }
+    }
+
+    function inspectChunk(index) {
+      const chunk = lastReferencedChunks[index];
+      if (!chunk) return;
+      currentChunk = chunk;
+
+      document.getElementById("drawerTitle").innerHTML = `📄 ${escapeHtml(chunk.filename)}`;
+      
+      const body = document.getElementById("excerptTabContent");
+      body.innerHTML = `
+        <div style="margin-bottom: 14px;">
+          <h4 style="margin-bottom: 8px; color: var(--primary); font-size: 1.1rem; font-weight: 700;">${escapeHtml(chunk.heading || chunk.title)}</h4>
+          <span class="drawer-meta-tag">📄 ${escapeHtml(chunk.filename)}</span>
+          <span class="drawer-meta-tag">Authority: ${escapeHtml(chunk.policy_authority || 'official')}</span>
+          <span class="drawer-meta-tag">Status: ${escapeHtml(chunk.status || 'active')}</span>
+        </div>
+        <div class="highlight-card">
+          <div class="highlight-header">
+            <span>🎯 Actual Grounded Source Excerpt</span>
+            <span style="font-size: 0.72rem; color: #b45309;">Relevance Score: ${chunk.score || 1.0}</span>
+          </div>
+          <div class="chunk-content-box">${escapeHtml(chunk.content)}</div>
+          <button class="jump-to-raw-btn" onclick="switchDrawerTab('fulldoc')">
+            🔍 View Highlighted in Full File &rarr;
+          </button>
+        </div>
+      `;
+
+      switchDrawerTab('excerpt');
+      document.getElementById("drawerOverlay").style.display = "block";
+      document.getElementById("chunkDrawer").classList.add("open");
+    }
+
+    function inspectByFilename(filename, heading) {
+      const cleanFile = filename.replace("data/", "");
+      currentChunk = {
+        filename: cleanFile,
+        heading: heading || "Official Source Document",
+        title: cleanFile,
+        status: "active",
+        policy_authority: "official",
+        audience: "customer",
+        score: "1.0",
+        content: `Source reference: ${filename}`
+      };
+
+      document.getElementById("drawerTitle").innerHTML = `📄 ${escapeHtml(cleanFile)}`;
+      
+      const body = document.getElementById("excerptTabContent");
+      body.innerHTML = `
+        <div style="margin-bottom: 14px;">
+          <h4 style="margin-bottom: 8px; color: var(--primary); font-size: 1.1rem; font-weight: 700;">${escapeHtml(heading || cleanFile)}</h4>
+          <span class="drawer-meta-tag">📄 ${escapeHtml(cleanFile)}</span>
+          <span class="drawer-meta-tag">Type: ${cleanFile.endsWith('.json') ? 'Database JSON' : 'Policy Markdown'}</span>
+          <span class="drawer-meta-tag">Status: active</span>
+        </div>
+        <div class="highlight-card">
+          <div class="highlight-header">
+            <span>🎯 Grounded Data Source</span>
+          </div>
+          <p style="font-size: 0.92rem; color: #1c1917; line-height: 1.6; margin-bottom: 10px;">
+            This file was referenced by the AI Agent to formulate its grounded response.
+          </p>
+          <button class="jump-to-raw-btn" onclick="switchDrawerTab('fulldoc')">
+            🔍 Open Full Source File &rarr;
+          </button>
+        </div>
+      `;
+
+      switchDrawerTab('excerpt');
+      document.getElementById("drawerOverlay").style.display = "block";
+      document.getElementById("chunkDrawer").classList.add("open");
+    }
+
+    function closeDrawer() {
+      document.getElementById("drawerOverlay").style.display = "none";
+      document.getElementById("chunkDrawer").classList.remove("open");
+    }
+
+    function escapeHtml(string) {
+      return String(string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+tenant_id: "aster-and-row"
+brand_name: "Aster & Row"
+description: "Premium bags, drinkware, and travel accessories"
+
+paths:
+  knowledge_base_dir: "knowledge-base"
+  orders_file: "data/orders.json"
+
+persona: >
+  You are an expert, honest, and reliable AI Customer Support Agent for Aster & Row.
+  You answer customer inquiries regarding returns, shipping, warranty, memberships, product care, and order status.
+
+policies:
+  standard_return_window_days: 30
+  trailplus_return_window_days: 45
+  cancellation_window_minutes: 30
+  require_citations: true
+  enable_order_lookup: true
