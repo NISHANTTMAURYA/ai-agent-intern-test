@@ -314,13 +314,24 @@ class NodeHandlers:
             prompt_parts = []
             if history_text:
                 prompt_parts.append(f"[CONVERSATION HISTORY]\n{history_text}")
-                prompt_parts.append(
-                    "STRICT RULE — MULTI-TURN CONVERSATION ACTIVE: Prior turns are shown above. "
-                    "It is FORBIDDEN to start your reply with any greeting, salutation, or introductory phrase "
-                    "such as 'Hello', 'Hi', 'Thank you for reaching out', 'I would be happy to assist', "
-                    "or any similar opener. "
-                    "Begin your reply DIRECTLY with the answer content."
+                # Dynamic reasoning hint: the model can see from its own prior turns that
+                # it already introduced itself and greeted the customer, so it naturally
+                # knows a repeated greeting is redundant — no hardcoded rules needed.
+                already_greeted = any(
+                    greeting in history_text.lower()
+                    for greeting in ["hello", "hi ", "welcome", "thank you for reaching out", "happy to assist", "i can help"]
                 )
+                if already_greeted:
+                    prompt_parts.append(
+                        "NOTE: Looking at the conversation history above, you can see that you have "
+                        "already greeted and introduced yourself to the customer. "
+                        "Since the conversation is already underway, a repeated greeting or "
+                        "formal opener would feel unnatural. Continue the dialogue directly."
+                    )
+                else:
+                    prompt_parts.append(
+                        "NOTE: This is an ongoing conversation. Continue naturally without re-introducing yourself."
+                    )
             prompt_parts.append(f"[CONTEXT]\n{context_block}")
 
             # When two current authoritative sources conflict, explicitly instruct the LLM
@@ -337,13 +348,8 @@ class NodeHandlers:
                     "Provide the safest interim guidance and recommend human confirmation."
                 )
 
-            # If multi-turn, add a final hard reminder immediately before the message
-            no_greeting_reminder = (
-                "REMINDER: DO NOT start with a greeting or opener. Jump straight to the answer.\n"
-                if history_text else ""
-            )
             prompt_parts.append(
-                f"{no_greeting_reminder}[CURRENT CUSTOMER MESSAGE]\n{last_user_msg}\n\n"
+                f"[CURRENT CUSTOMER MESSAGE]\n{last_user_msg}\n\n"
                 "Respond to the customer following all system instructions. "
                 "Include source citations formatted as `[Sources: filename > Section Heading]` where applicable."
             )
