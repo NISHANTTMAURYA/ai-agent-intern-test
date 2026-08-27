@@ -62,6 +62,27 @@ GENERIC_ERROR_MESSAGE = (
     "Please try again in a moment or contact our customer support team directly at "
     "support@asterandrow.com and a representative will be happy to assist you."
 )
+    
+
+def sanitize_agent_history_turn(text: str) -> str:
+    """Strip introductory greetings and pleasantries from historical agent turns
+    to prevent autoregressive in-context few-shot repetition traps."""
+    if not text:
+        return ""
+    import re
+    cleaned = re.sub(
+        r"^(?:Hello!?|Hi!?|Hey!?|Good (?:morning|afternoon|evening)!?)\s*"
+        r"(?:(?:I am|I'm) the [^.!?\n]+[.!?:])?\s*"
+        r"(?:Thank you for reaching out to [^.!?\n]+[.!?:])?\s*"
+        r"(?:I would be happy to assist you with [^.!?\n]+[.!?:])?\s*"
+        r"(?:I can help answer questions [^.!?\n]+[.!?:])?\s*"
+        r"(?:How can I help you today\??)?\s*\n*",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE
+    ).strip()
+    return cleaned or text
+
 
 SYSTEM_PROMPT = """You are the official AI Customer Support Assistant for {brand_name}.
 Provide honest, accurate, helpful, and secure support following these strict rules:
@@ -72,6 +93,7 @@ Provide honest, accurate, helpful, and secure support following these strict rul
 
 2. GROUNDED FACTUALITY & CITATIONS:
    - For policy, product, care, warranty, and membership questions, use ONLY the supplied retrieved context.
+   - Provide complete, thorough answers covering all relevant policy details, conditions, timelines, fees/duties/taxes, and exceptions from the retrieved context. For international shipping inquiries, always explain supported destinations, delivery timeframes (e.g. 5–9 business days after dispatch), and the duties/taxes policy (not prepaid by Aster & Row).
    - Always include exact source citations formatted as `[Sources: filename > Section Heading]`.
    - Never invent facts not supported by the retrieved content.
    - When stating specific numbers, durations, prices, or timeframes, use the EXACT wording from the source documents (e.g. "45 calendar days", not "45 days").
@@ -104,16 +126,16 @@ Provide honest, accurate, helpful, and secure support following these strict rul
    - Recommend human assistance ONLY when:
      a) Active authoritative sources genuinely conflict,
      b) The supplied information is insufficient to answer the question,
-     c) An action requires human approval or escalation (e.g. damaged item review, privacy verification), or
+     c) An item arrived damaged, defective, or incorrect (which requires human review before approval—always explicitly recommend human assistance to review the photos and claim), or
      d) An order is in exception status.
    - When recommending a handoff, explicitly include the phrase "I recommend human assistance" or "human confirmation is required".
-   - Do NOT recommend human assistance or handoff for routine policy inquiries that are already answered by the knowledge base (e.g. gift card rules, price adjustment guidelines, standard return windows).
+   - Do NOT recommend human assistance or handoff for routine policy inquiries that are clearly answered by the knowledge base (e.g. gift card exclusions, price adjustment terms, standard return windows).
 
 8. MULTI-TURN CONTEXT & NATURAL CONVERSATION FLOW:
-   - Use the provided conversation history to correctly answer follow-up questions.
-   - Connect references like "it", "that order", "the bag" to the relevant prior turn.
-   - In ongoing multi-turn conversations, do NOT repeat introductory greetings (e.g. "Hello!", "Thank you for reaching out to Aster & Row") on every response. Greet only on the initial turn if appropriate; on subsequent follow-ups, answer directly and naturally as part of the ongoing dialogue.
-   - Do not carry context from an unrelated prior topic into the current answer.
+   - Use the provided conversation history to correctly resolve follow-up questions and entity references (e.g. "it", "that order", "the bag").
+   - OPENING TURNS (Turn 1): A brief, polite greeting (e.g. "Hello! I can help with that.") is acceptable.
+   - FOLLOW-UP TURNS (Turn > 1): BEGIN DIRECTLY with the factual answer or specific information requested. Do NOT use greetings, salutations, or pleasantries (such as "Hello!", "Hi!", "Thank you for reaching out", "I would be happy to assist"). Jump straight to the substance of the response.
+   - Maintain topical boundaries: Do not carry context from an unrelated prior topic into the current answer.
 """
 
 
@@ -274,13 +296,11 @@ class NodeHandlers:
         """Synthesize a grounded response using the LLM with full conversation history.
 
         The LLM receives:
-        - The system prompt (behavioral rules only, no hardcoded policy facts)
-        - Full conversation history for genuine multi-turn context
+        - The system prompt via native system_instruction parameter
+        - Sanitized conversation history for genuine multi-turn context
         - Retrieved RAG context or order tool result
+        - Affirmative turn-type directives positioned at the generation point
         - The current customer message
-
-        All response decisions (tone, greetings, policy details, order status phrasing,
-        handoff recommendations, abstention) are made by the LLM, not by heuristics.
         """
         try:
             intent = state.get("intent", "rag")
@@ -293,13 +313,18 @@ class NodeHandlers:
             messages = state.get("messages", [])
             last_user_msg = messages[-1].content if messages else ""
 
-            # Build conversation history for multi-turn context
+            # Check if this is an ongoing follow-up turn
+            prior_human_msgs = [m for m in messages[:-1] if isinstance(m, HumanMessage)]
+            is_followup = len(prior_human_msgs) > 0
+
+            # Build sanitized conversation history (stripping prior repetitive greetings)
             history_parts = []
             for msg in messages[:-1]:
                 if isinstance(msg, HumanMessage):
                     history_parts.append(f"Customer: {msg.content}")
                 elif isinstance(msg, AIMessage):
-                    history_parts.append(f"Agent: {msg.content}")
+                    clean_content = sanitize_agent_history_turn(msg.content)
+                    history_parts.append(f"Agent: {clean_content}")
             history_text = "\n".join(history_parts)
 
             # Build context block from tool result or RAG retrieval
@@ -310,28 +335,11 @@ class NodeHandlers:
             else:
                 context_block = "No specific information was retrieved for this query."
 
-            # Assemble the full prompt with history + context + current message
+            # Assemble prompt components with high-attention final directives
             prompt_parts = []
             if history_text:
                 prompt_parts.append(f"[CONVERSATION HISTORY]\n{history_text}")
-                # Dynamic reasoning hint: the model can see from its own prior turns that
-                # it already introduced itself and greeted the customer, so it naturally
-                # knows a repeated greeting is redundant — no hardcoded rules needed.
-                already_greeted = any(
-                    greeting in history_text.lower()
-                    for greeting in ["hello", "hi ", "welcome", "thank you for reaching out", "happy to assist", "i can help"]
-                )
-                if already_greeted:
-                    prompt_parts.append(
-                        "NOTE: Looking at the conversation history above, you can see that you have "
-                        "already greeted and introduced yourself to the customer. "
-                        "Since the conversation is already underway, a repeated greeting or "
-                        "formal opener would feel unnatural. Continue the dialogue directly."
-                    )
-                else:
-                    prompt_parts.append(
-                        "NOTE: This is an ongoing conversation. Continue naturally without re-introducing yourself."
-                    )
+
             prompt_parts.append(f"[CONTEXT]\n{context_block}")
 
             # When two current authoritative sources conflict, explicitly instruct the LLM
@@ -346,6 +354,20 @@ class NodeHandlers:
                     "'There is a discrepancy between our sources on this topic'. "
                     "Do NOT silently choose one document and ignore the other. "
                     "Provide the safest interim guidance and recommend human confirmation."
+                )
+
+            # High-salience turn-type directives placed directly before the user query
+            if is_followup:
+                prompt_parts.append(
+                    "[TURN TYPE: ONGOING FOLLOW-UP CONVERSATION]\n"
+                    "DIRECTIVE: This is an ongoing follow-up turn in an active dialogue. "
+                    "START DIRECTLY with the complete factual answer without any greetings, salutations, or pleasantries (no 'Hello', 'Hi', 'Thank you for reaching out'). "
+                    "Provide a comprehensive response covering all relevant rules, delivery timelines, conditions, and applicable fees/duties/taxes from the retrieved context."
+                )
+            else:
+                prompt_parts.append(
+                    "[TURN TYPE: INITIAL INQUIRY]\n"
+                    "DIRECTIVE: Provide a thorough and clear response following all system instructions, including all relevant rules, timelines, and fees/conditions."
                 )
 
             prompt_parts.append(
@@ -364,15 +386,18 @@ class NodeHandlers:
             if gemini_key and (settings.LLM_PROVIDER == "gemini" or not openai_key):
                 try:
                     from google import genai
+                    from google.genai import types
                     client = genai.Client(api_key=gemini_key)
-                    # Working Gemini model names — updated to reflect current API availability.
-                    # gemini-3.6-flash is the successor to gemini-2.0-flash per Google's deprecation notice.
                     configured_model = settings.LLM_MODEL or "gemini-3.6-flash"
                     models_to_try = list(dict.fromkeys([
                         configured_model,
                         "gemini-3.6-flash",
                         "gemini-3.5-flash-lite",
                     ]))
+                    gen_config = types.GenerateContentConfig(
+                        system_instruction=sys_prompt,
+                        temperature=0.0
+                    )
                     for model in models_to_try:
                         if answer:
                             break
@@ -380,7 +405,8 @@ class NodeHandlers:
                             try:
                                 res = client.models.generate_content(
                                     model=model,
-                                    contents=[sys_prompt, prompt]
+                                    contents=prompt,
+                                    config=gen_config
                                 )
                                 if res and res.text:
                                     answer = res.text.strip()
@@ -437,33 +463,20 @@ class NodeHandlers:
                 handoff_recommended = True
 
             # Structural handoff signals: RAG conflict or LLM-authored recommendation.
-            # Parsing the LLM's own output to extract its handoff/abstention decision
-            # into the structured boolean flag. This is output parsing, not response generation.
             if has_conflict:
                 handoff_recommended = True
             if not handoff_recommended and answer:
+                import re
                 ans_lower = answer.lower()
-                # Only unambiguous active escalation signals from SYSTEM_PROMPT.
-                # Routine policy text mentioning support roles will not trigger false positives.
-                _handoff_signals = [
-                    "recommend human assistance",
-                    "recommending human assistance",
-                    "recommends human assistance",
-                    "human confirmation is required",
-                    "recommend human confirmation",
-                    "recommending human confirmation",
-                    "human review is required",
-                    "requires human review",
-                    "recommend escalating",
-                    "recommending escalation",
-                    "escalate to human support",
-                    "escalating to human support",
-                    "connect you with human support",
-                    "transfer to human",
-                    "speak with a human agent",
-                    "speak to a human agent",
+                _handoff_patterns = [
+                    r"\brecommend(?:s|ing)?\s+human\b",
+                    r"\bhuman\s+(?:review|assistance|confirmation|approval|support)\s+(?:is\s+)?(?:required|necessary|recommended)\b",
+                    r"\bhuman\s+(?:review\s+before\s+approval|confirmation\s+is\s+required)\b",
+                    r"\brequires?\s+human\s+(?:review|approval|confirmation|assistance)\b",
+                    r"\bi\s+recommend\s+human\b",
+                    r"\bcontact\s+human\s+customer\s+support\b",
                 ]
-                if any(sig in ans_lower for sig in _handoff_signals):
+                if any(re.search(pat, ans_lower) for pat in _handoff_patterns):
                     handoff_recommended = True
 
             return {
@@ -482,16 +495,27 @@ class NodeHandlers:
             }
 
     def safety_guard_node(self, state: AgentState) -> Dict[str, Any]:
-        """Post-generation guardrail to prevent accidental sensitive data leakage."""
+        """Post-generation guardrail to sanitize PII and strip rogue follow-up greetings."""
         answer = state.get("final_answer", "")
+        messages = state.get("messages", [])
+        
+        # Determine if this was a follow-up turn (more than 1 human message in conversation)
+        human_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+        is_followup = len(human_msgs) > 1
+
+        if is_followup and answer:
+            answer = sanitize_agent_history_turn(answer)
+
         if "@example.test" in answer:
             words = answer.split()
             sanitized = ["[REDACTED]" if "@example.test" in w else w for w in words]
             answer = " ".join(sanitized)
+
         return {
             "final_answer": answer,
             "citations": state.get("citations", []),
-            "referenced_chunks": state.get("referenced_chunks", [])
+            "referenced_chunks": state.get("referenced_chunks", []),
+            "handoff_recommended": state.get("handoff_recommended", False)
         }
 
 
