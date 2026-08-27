@@ -189,10 +189,53 @@ class OrderLookupTool:
             requires_human_handoff=(status in ["exception", "delayed", "damaged"])
         )
         
+        # Format date to human friendly format if standard YYYY-MM-DD
+        formatted_eta = estimated_delivery
+        if estimated_delivery:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(estimated_delivery.strip(), "%Y-%m-%d")
+                formatted_eta = dt.strftime("%B %-d, %Y") if hasattr(dt, 'strftime') else estimated_delivery
+            except Exception:
+                try:
+                    from datetime import datetime
+                    dt = datetime.strptime(estimated_delivery.strip(), "%Y-%m-%d")
+                    formatted_eta = dt.strftime("%B %d, %Y").replace(" 0", " ")
+                except Exception:
+                    formatted_eta = estimated_delivery
+
+        # Construct dynamic, comprehensive customer-safe message
+        msg_parts = [f"Order {normalized_id} has an official status of {status}."]
+        if status == "shipped":
+            if carrier and tracking_number:
+                msg_parts.append(f"It is currently in transit with {carrier} under tracking number {tracking_number}.")
+            elif carrier:
+                msg_parts.append(f"It is currently in transit with {carrier}.")
+            if formatted_eta:
+                msg_parts.append(f"The estimated delivery date is {formatted_eta}.")
+            else:
+                msg_parts.append("A specific delivery estimate is unavailable at this time.")
+        elif status == "cancelled":
+            msg_parts.append("The order was cancelled and it will not be shipped or delivered.")
+        elif status == "returned":
+            msg_parts.append("The order has been returned.")
+        elif status == "delivered":
+            if safe_record.delivered_at:
+                msg_parts.append(f"Delivered on {safe_record.delivered_at}.")
+            else:
+                msg_parts.append("The package has been delivered.")
+        elif safe_record.customer_safe_message:
+            msg_parts.append(safe_record.customer_safe_message)
+
+        if safe_record.requires_human_handoff:
+            msg_parts.append("I recommend human assistance for this order inquiry.")
+
+        full_message = " ".join(msg_parts)
+
         return OrderLookupResponse(
             success=True,
             status="found",
-            message=f"Order {normalized_id} status is {status}.",
+            message=full_message,
             order=safe_record,
             requires_human_handoff=safe_record.requires_human_handoff
         )

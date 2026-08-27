@@ -285,20 +285,26 @@ class HybridRetriever:
             rrf_score = (1.0 / (k_rrf + d_rank)) + (1.0 / (k_rrf + s_rank))
             rrf_scores[cid] = rrf_score
 
-        # Step 4: Metadata Authority Scoring
+        # Step 4: Metadata Authority & Audience Scoring
         scored_map: Dict[str, float] = {}
         for cid, score in rrf_scores.items():
             chunk = self.chunk_by_id.get(cid)
             if chunk:
                 status = chunk.get("status", "active").lower()
                 authority = chunk.get("policy_authority", "official").lower()
+                audience = chunk.get("audience", "customer").lower()
+                
+                # Exclude internal-only documents from customer knowledge retrieval
+                if audience == "internal":
+                    continue
+
                 # Boost official active documents; penalize superseded versions
                 mult = 1.25 if (status == "active" and authority == "official") else (0.25 if status == "superseded" else 0.1)
                 scored_map[cid] = score * mult
 
         top_candidates = sorted(scored_map.items(), key=lambda x: x[1], reverse=True)[:top_k]
         
-        # Step 5: Lexical Alignment Scoring
+        # Step 5: Lexical Alignment Scoring & Dynamic Filtering
         query_terms = set(tokenize_text(query)) - {"a", "an", "the", "in", "on", "at", "for", "to", "of", "and", "or", "is", "are", "does", "do", "how", "what", "can", "i", "my", "your"}
         reranked = []
         for cid, base_score in top_candidates:
@@ -311,6 +317,12 @@ class HybridRetriever:
             reranked.append((base_score * boost, c))
 
         reranked.sort(key=lambda x: x[0], reverse=True)
+
+        # Dynamic score threshold: discard distant noise chunks that score < 40% of top match
+        if reranked:
+            top_score = reranked[0][0]
+            reranked = [item for item in reranked if item[0] >= (top_score * 0.35)]
+
         final_chunks = [
             ScoredChunk(
                 chunk_id=c["chunk_id"],

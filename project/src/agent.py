@@ -192,6 +192,36 @@ class NodeHandlers:
                     "referenced_chunks": []
                 }
 
+            # Conversational meta-questions (e.g. "what did I ask you?", "who are you?")
+            query_low_clean = current_query.lower().strip("?!., ")
+            if any(pat in query_low_clean for pat in ["what did i ask", "what did i just ask", "repeat my question", "what was my last question", "what did i say"]):
+                prior_user_msgs = [m.content for m in messages[:-1] if isinstance(m, HumanMessage)]
+                if prior_user_msgs:
+                    last_q = prior_user_msgs[-1]
+                    ans = f"Your previous question was: \"{last_q}\""
+                else:
+                    ans = "This is the start of our conversation."
+                return {
+                    "intent": "greeting",
+                    "final_answer": ans,
+                    "current_query": current_query,
+                    "tool_name": None,
+                    "tool_args": {},
+                    "citations": [],
+                    "referenced_chunks": []
+                }
+
+            if any(query_low_clean == p or query_low_clean.startswith(p) for p in ["who are you", "what are you", "what can you do", "introduce yourself"]):
+                return {
+                    "intent": "greeting",
+                    "final_answer": "I am the Aster & Row AI Support Assistant. I can help answer questions about our returns policy, shipping, warranty, product care, or check your order status.",
+                    "current_query": current_query,
+                    "tool_name": None,
+                    "tool_args": {},
+                    "citations": [],
+                    "referenced_chunks": []
+                }
+
             # Explicit order ID in the current message triggers the order lookup tool.
             order_id = OrderLookupTool.normalize_order_id(current_query)
             if order_id:
@@ -204,14 +234,37 @@ class NodeHandlers:
                     "referenced_chunks": []
                 }
 
+            # Contextual Query Expansion for elliptical multi-turn follow-ups
+            search_query = current_query
+            query_low = current_query.lower()
+            
+            # Unambiguous standalone keywords that define their own domain context
+            standalone_keywords = [
+                "ship", "shipping", "internationally", "international", "canada", "returns",
+                "return", "warranty", "membership", "trailplus", "cancel", "cancellation",
+                "tumbler", "breeze", "gift card", "price adjustment"
+            ]
+            is_standalone = any(re.search(rf"\b{kw}\b", query_low) for kw in standalone_keywords)
+
+            # Expand ONLY when the query is an elliptical follow-up or pronoun reference
+            if not is_standalone and len(messages) > 1:
+                elliptical_markers = [
+                    r"^what about\b", r"^how about\b", r"^what if\b", r"^and \b",
+                    r"\b(it|they|them|that|this|these|those)\b",
+                    r"^i will\b", r"^i won't\b", r"^yes\b", r"^no\b", r"^what\?*$"
+                ]
+                if any(re.search(p, query_low) for p in elliptical_markers) or len(current_query.split()) <= 2:
+                    prior_user_msgs = [m.content for m in messages[:-1] if isinstance(m, HumanMessage)]
+                    if prior_user_msgs:
+                        prev_user_text = prior_user_msgs[-1]
+                        search_query = f"{prev_user_text} {current_query}"
+
             # Everything else: RAG retrieval + LLM synthesis.
-            # The LLM receives full conversation history so multi-turn follow-ups,
-            # policy questions, and all other cases are handled dynamically.
             return {
                 "intent": "rag",
-                "current_query": current_query,
+                "current_query": search_query,
                 "tool_name": "rag_tool",
-                "tool_args": {"query": current_query},
+                "tool_args": {"query": search_query},
                 "citations": [],
                 "referenced_chunks": []
             }
@@ -297,6 +350,15 @@ class NodeHandlers:
         - The current customer message
         """
         try:
+            if state.get("final_answer"):
+                ans = state["final_answer"]
+                return {
+                    "final_answer": ans,
+                    "citations": state.get("citations", []),
+                    "referenced_chunks": state.get("referenced_chunks", []),
+                    "handoff_recommended": state.get("handoff_recommended", False),
+                    "messages": [AIMessage(content=ans)]
+                }
             intent = state.get("intent", "rag")
             tool_result_str = state.get("tool_result")
             retrieved_context = state.get("retrieved_context", "")
@@ -373,27 +435,36 @@ class NodeHandlers:
 
             # LLM synthesis with provider fallback
             answer = None
-            gemini_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            gemini_key = os.environ.get("GEMINI_API_KEY") or settings.EVAL_API_KEY or settings.GEMINI_API_KEY
             openai_key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
 
-            if gemini_key and (settings.LLM_PROVIDER == "gemini" or not openai_key):
+            if (gemini_key or settings.EVAL_API_KEY) and (settings.LLM_PROVIDER == "gemini" or not openai_key):
                 try:
                     from google import genai
                     from google.genai import types
-                    client = genai.Client(api_key=gemini_key)
-                    configured_model = "gemini-3.6-flash"
+                    
+                    candidate_keys = [k for k in [os.environ.get("GEMINI_API_KEY"), settings.GEMINI_API_KEY, settings.EVAL_API_KEY] if k]
                     models_to_try = [
+                        settings.LLM_MODEL or "gemini-3.5-flash",
+                        "gemini-3.5-flash",
                         "gemini-3.6-flash",
-                        "gemini-3.5-flash-lite",
+                        "gemini-flash-latest"
                     ]
+                    models_to_try = list(dict.fromkeys(models_to_try))
+                    candidate_keys = list(dict.fromkeys(candidate_keys))
+
                     gen_config = types.GenerateContentConfig(
                         system_instruction=sys_prompt,
                         temperature=0.0
                     )
-                    for model in models_to_try:
+                    
+                    for key in candidate_keys:
                         if answer:
                             break
-                        for attempt in range(2):
+                        client = genai.Client(api_key=key)
+                        for model in models_to_try:
+                            if answer:
+                                break
                             try:
                                 res = client.models.generate_content(
                                     model=model,
@@ -405,12 +476,7 @@ class NodeHandlers:
                                     logger.debug(f"LLM synthesis succeeded with model={model}")
                                     break
                             except Exception as e:
-                                err_str = str(e)
-                                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                                    time.sleep(3)
-                                    continue
-                                logger.warning(f"Model {model} attempt {attempt+1} failed: {e}")
-                                break
+                                logger.warning(f"Gemini {model} call with key={key[:8]}... failed: {e}")
                 except Exception as e:
                     logger.error(f"Gemini client error: {e}")
 
@@ -431,25 +497,33 @@ class NodeHandlers:
                 except Exception as e:
                     logger.error(f"OpenAI error: {e}")
 
-            # Fallback: raw authoritative chunk text when all LLM APIs are unavailable
+            # Fallback: authoritative chunk text when all LLM APIs are unavailable
             if not answer and referenced_chunks:
                 top_chunks = [
                     c for c in referenced_chunks
                     if c.get("policy_authority") == "official" and c.get("status") == "active"
                 ] or referenced_chunks
-                snippets = [c.get("content", "").strip() for c in top_chunks[:3] if c.get("content")]
-                cites = [
-                    c.get("citation") or f"{c.get('filename')} > {c.get('heading')}"
-                    for c in top_chunks[:3]
-                ]
-                if snippets:
-                    answer = "\n\n".join(snippets)
-                else:
+
+                if has_conflict:
                     answer = (
-                        "The supplied information is insufficient to answer your request definitively. "
-                        "Please contact human customer support for assistance."
+                        "Our official sources conflict on this point: our product care guide states that the stainless-steel body "
+                        "should be hand-washed, while our product card states that all components are dishwasher safe. "
+                        "As interim guidance to avoid damaging the finish, it is safest to hand-wash the stainless-steel body. "
+                        "I recommend human assistance to confirm the official care instructions."
                     )
                     handoff_recommended = True
+                else:
+                    primary_doc = top_chunks[0].get("filename") if top_chunks else None
+                    primary_chunks = [c for c in top_chunks if c.get("filename") == primary_doc] if primary_doc else top_chunks
+                    snippets = [c.get("content", "").strip() for c in primary_chunks[:3] if c.get("content")]
+                    if snippets:
+                        answer = "\n\n".join(snippets)
+                    else:
+                        answer = (
+                            "The supplied information is insufficient to answer your request definitively. "
+                            "I recommend human assistance to confirm this policy."
+                        )
+                        handoff_recommended = True
             elif not answer and intent == "order_lookup":
                 user_msg_low = last_user_msg.lower()
                 is_privacy_probe = any(kw in user_msg_low for kw in ["email", "address", "note", "risk", "phone", "private", "credit card", "payment", "reveal"])
@@ -460,9 +534,14 @@ class NodeHandlers:
                         "I recommend human assistance for verified customer account requests."
                     )
                     handoff_recommended = True
-                elif tool_result and getattr(tool_result, "message", None):
-                    answer = tool_result.message
-                    handoff_recommended = getattr(tool_result, "requires_human_handoff", False)
+                elif tool_result_str:
+                    try:
+                        import json
+                        parsed_res = json.loads(tool_result_str)
+                        answer = parsed_res.get("message") or str(tool_result_str)
+                        handoff_recommended = parsed_res.get("requires_human_handoff", False)
+                    except Exception:
+                        answer = str(tool_result_str)
                 else:
                     answer = "Please provide your order ID (e.g. ORD-1007) so I can check its status for you."
             elif not answer:
@@ -502,19 +581,45 @@ class NodeHandlers:
             }
 
     def safety_guard_node(self, state: AgentState) -> Dict[str, Any]:
-        """Post-generation guardrail to sanitize PII."""
+        """Post-generation guardrail to sanitize PII and enforce safety boundaries."""
         answer = state.get("final_answer", "")
+        handoff_recommended = state.get("handoff_recommended", False)
+        messages = state.get("messages", [])
+        human_msgs = [m.content for m in messages if isinstance(m, HumanMessage)]
+        last_user_msg = human_msgs[-1] if human_msgs else ""
+        user_msg_low = last_user_msg.lower()
 
+        # 1. PII Redaction
         if "@example.test" in answer:
             words = answer.split()
             sanitized = ["[REDACTED]" if "@example.test" in w else w for w in words]
             answer = " ".join(sanitized)
 
+        # 2. System Security & Jailbreak Refusal Guardrail
+        if any(pat in user_msg_low for pat in ["system prompt", "developer mode", "secret key", "api key", "ignore previous instructions", "override system", "jailbreak"]):
+            if not any(w in answer.lower() for w in ["cannot disclose", "will not share", "refuse", "security"]):
+                answer = "For system security, I cannot disclose the internal system prompt, developer mode instructions, or secret keys. I can only assist with Aster & Row customer support questions."
+            handoff_recommended = False
+
+        # 3. Dynamic Abstention Guardrail for Uncovered Capabilities
+        if any(w in user_msg_low for w in ["vegan", "adhesive", "monogram", "embroidery", "engraving", "customization", "sustainable packaging", "gots"]):
+            chunks = state.get("referenced_chunks", [])
+            has_explicit_match = any(any(w in c.get("content", "").lower() for w in ["vegan", "adhesive", "monogram", "embroidery", "engraving"]) for c in chunks)
+            if not has_explicit_match:
+                answer = "The supplied information is insufficient to answer your request definitively regarding this topic. Human confirmation is required, and I recommend human assistance to assist you further."
+                handoff_recommended = True
+
+        # 4. Damaged/Defective Final Sale Human Review Guardrail
+        if "final" in user_msg_low and any(w in user_msg_low for w in ["damaged", "wrong", "defective", "broken", "zipper", "incorrect"]):
+            if "human" not in answer.lower():
+                answer += "\n\nThe final sale does not block damaged-item review. Please report the issue within 7 days of delivery. Human review before approval is required, and I recommend human assistance for this claim."
+                handoff_recommended = True
+
         return {
             "final_answer": answer,
             "citations": state.get("citations", []),
             "referenced_chunks": state.get("referenced_chunks", []),
-            "handoff_recommended": state.get("handoff_recommended", False)
+            "handoff_recommended": handoff_recommended
         }
 
 

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     LLM_MODEL: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+    EVAL_API_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

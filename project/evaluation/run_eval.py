@@ -206,6 +206,10 @@ def run_evaluation_suite(tenant_id: str = "aster-and-row", delay_seconds: float 
 
 
 if __name__ == "__main__":
+    import os
+    from src.core import settings
+    if settings.EVAL_API_KEY:
+        os.environ["GEMINI_API_KEY"] = settings.EVAL_API_KEY
     parser = argparse.ArgumentParser(description="Run evaluation test cases.")
     parser.add_argument("--delay", type=float, default=0.2, help="Delay in seconds between test cases (default: 0.2)")
     args = parser.parse_args()
