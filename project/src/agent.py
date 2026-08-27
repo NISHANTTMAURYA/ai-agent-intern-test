@@ -476,9 +476,9 @@ class NodeHandlers:
                                     logger.debug(f"LLM synthesis succeeded with model={model}")
                                     break
                             except Exception as e:
-                                logger.warning(f"Gemini {model} call with key={key[:8]}... failed: {e}")
+                                logger.debug(f"Gemini {model} call with key={key[:8]}... failed: {e}")
                 except Exception as e:
-                    logger.error(f"Gemini client error: {e}")
+                    logger.debug(f"Gemini client error: {e}")
 
             elif openai_key:
                 try:

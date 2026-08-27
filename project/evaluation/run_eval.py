@@ -6,11 +6,19 @@ multi-source grounding, prompt security, groundedness, safe abstention, and sour
 
 import argparse
 import json
+import logging
+import os
 import sys
 import time
 import uuid
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List
+
+# Suppress SDK warnings and internal log noise for clean CLI reporting
+warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger().setLevel(logging.ERROR)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))

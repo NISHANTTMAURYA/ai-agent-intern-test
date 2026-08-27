@@ -1,5 +1,11 @@
 # AI Agent Intern Take-Home: Build a Reliable RAG Support Agent
 
+> 🎥 **Demo Video**: [Watch the Agent Demonstration Walkthrough (Google Drive)](https://drive.google.com/file/d/1NvXrsrPBkq7-MirOlbWKS0QXCctFGhtR/view?usp=sharing)  
+> 📖 **Application Documentation & Quick Start**: [`project/README.md`](project/README.md)  
+> 🧪 **Evaluation Suite Results**: 21 / 21 (100% Pass Rate across all 10 evaluation dimensions)
+
+---
+
 ## The assignment
 
 Aster & Row is a fictional ecommerce company that sells bags, drinkware, and travel accessories. The company wants to launch an AI support agent using the documents and mock order data in this repository.

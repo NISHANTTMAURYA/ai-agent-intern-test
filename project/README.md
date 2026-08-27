@@ -1,8 +1,10 @@
 # Universal RAG Support Agent (Aster & Row)
 
-[![Tests](https://img.shields.io/badge/Evaluation-21%2F21%20(100%25)-brightgreen)](file:///Users/nishantmaurya/cometchat/evaluation/run_eval.py)
-[![Architecture](https://img.shields.io/badge/Architecture-LangGraph%20%2B%20Hybrid%20RAG-blue)](file:///Users/nishantmaurya/cometchat/architecture.md)
-[![Multi-Tenant](https://img.shields.io/badge/Multi--Tenant-Ready-purple)](file:///Users/nishantmaurya/cometchat/tenants/)
+[![Tests](https://img.shields.io/badge/Evaluation-21%2F21%20(100%25)-brightgreen)](evaluation/run_eval.py)
+[![Architecture](https://img.shields.io/badge/Architecture-LangGraph%20%2B%20Hybrid%20RAG-blue)](architecture.md)
+[![Multi-Tenant](https://img.shields.io/badge/Multi--Tenant-Ready-purple)](tenants/)
+
+> 🎥 **Demo Video**: [Watch the Agent Walkthrough Demonstration Video (Google Drive)](https://drive.google.com/file/d/1NvXrsrPBkq7-MirOlbWKS0QXCctFGhtR/view?usp=sharing)
 
 An enterprise-grade, multi-tenant AI Customer Support Agent built for **Aster & Row** (and pluggable for any brand). It reliably handles complex real-world conditions: conflicting policy documents, prompt injection attempts, sensitive data privacy protection, order status lookups with stale field sanitization, and multi-turn conversational session context.
 
@@ -192,6 +194,7 @@ The server automatically initializes isolated vector collections and order tools
 ## 📹 Video Demonstration
 
 Demonstration walkthrough of the agent in action:
+▶️ **[Watch the full demo video on Google Drive](https://drive.google.com/file/d/1NvXrsrPBkq7-MirOlbWKS0QXCctFGhtR/view?usp=sharing)**
 
 - **Knowledge-base citation query:** Asking about return policy with `01-returns-policy-current.md` citations.
 - **Sanitized order status lookup:** Checking `ORD-1007` while strictly withholding private customer data.
@@ -199,4 +202,4 @@ Demonstration walkthrough of the agent in action:
 - **Conflict detection & safe abstention:** Surfacing Breeze Tumbler document discrepancies and refusing prompt injection attempts.
 - **Automated test suite:** Running `python evaluation/run_eval.py` with 100% pass rate.
 
-*(See [walkthrough documentation](file:///Users/nishantmaurya/cometchat/architecture.md) for full flow traces)*.
+*(See [walkthrough documentation](architecture.md) for full flow traces)*.
